@@ -1,0 +1,131 @@
+---
+title: "Untitled"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+```{r}
+library(dplyr)
+library(ggplot2)
+library(lubridate)
+library(incidence)
+library(outbreaks)
+```
+
+
+```{r}
+coronaData = read.csv("All_Corona_Data.csv")
+```
+
+```{r}
+coronaData$Date = ymd(coronaData$Date)
+coronaData$cityName = as.factor(as.character(coronaData$cityName))
+
+aggData = coronaData %>% group_by(Date, provinceShortName) %>% summarize(sumConf = sum(confirmedCount), sumCured = sum(curedCount), sumDead = sum(deadCount), sumSus = sum(suspectedCount))
+```
+
+```{r}
+ggplot(coronaData %>% filter(cityName == "Wuhan"), aes(x = Date, y = confirmedCount)) + geom_line()
+ggplot(aggData %>% filter(provinceShortName == "Hubei" ), aes(x = Date, y = sumConf, col = provinceShortName)) + geom_line()
+```
+
+```{r}
+joinedData = coronaData %>% group_by(Date, cityName) %>% summarize(confirmedCount = sum(confirmedCount), curedCount = sum(curedCount), deadCount = sum(deadCount)) %>% arrange(cityName) %>% group_by(cityName) %>% mutate(index = row_number())
+```
+
+```{r}
+joinedData$NumNewCases = 0
+joinedData$NumNewDeaths = 0
+joinedData$NumNewRecovery = 0
+
+for(i in 1:nrow(joinedData)){
+  if(joinedData[i,]$index != 1){
+    prevData = joinedData[i-1,] #%>% filter(cityName == joinedData[i,]$cityName & index == joinedData[i,]$index-1)
+    joinedData[i,]$NumNewCases = joinedData[i,]$confirmedCount-prevData$confirmedCount
+    joinedData[i,]$NumNewDeaths = joinedData[i,]$deadCount-prevData$deadCount
+    joinedData[i,]$NumNewRecovery = joinedData[i,]$curedCount-prevData$curedCount
+  }
+  else{
+    joinedData[i,]$NumNewCases = joinedData[i,]$confirmedCount
+    joinedData[i,]$NumNewDeaths = joinedData[i,]$deadCount
+    joinedData[i,]$NumNewRecovery = joinedData[i,]$curedCount
+  }
+}
+```
+
+```{r}
+ggplot(joinedData %>% filter(cityName == "Wuhan"), aes(x = Date, y = NumNewRecovery, col = cityName)) + geom_line()
+```
+
+```{r}
+wuhanData = joinedData %>% filter(cityName == "Wuhan")
+```
+
+```{r}
+wuhanData_Expanded = c()
+for(j in 1:nrow(wuhanData))
+  if(wuhanData[j,]$NumNewCases > 0){
+    wuhanData_Expanded = c(wuhanData_Expanded, rep(as.character(wuhanData[j,]$Date), wuhanData[j,]$NumNewCases))
+  }
+  if(wuhanData[j,]$NumNewCases <= 0){
+    wuhanData_Expanded = c(wuhanData_Expanded, rep(as.character(wuhanData[j,]$Date), 0))
+  }
+```
+
+
+```{r}
+incidents <- incidence(wuhanData_Expanded)
+plot(incidents)
+splitFit <- fit(incidents, split = as.Date("2020-02-13"))
+plot(splitFit)
+```
+
+```{r}
+formatData <- function(city){
+  data = coronaData %>% group_by(Date, cityName) %>% summarize(confirmedCount = sum(confirmedCount), curedCount = sum(curedCount), deadCount = sum(deadCount)) %>% arrange(cityName) %>% group_by(cityName) %>% mutate(index = row_number())
+  
+  data <- data %>% filter(cityName == city)
+  data$NumNewCases = 0
+  data$NumNewDeaths = 0
+  data$NumNewRecovery = 0
+  
+  for(i in 1:nrow(data)){
+    if(data[i,]$index != 1){
+      prevData = data[i-1,] #%>% filter(cityName == data[i,]$cityName & index == data[i,]$index-1)
+      data[i,]$NumNewCases = data[i,]$confirmedCount-prevData$confirmedCount
+      data[i,]$NumNewDeaths = data[i,]$deadCount-prevData$deadCount
+      data[i,]$NumNewRecovery = data[i,]$curedCount-prevData$curedCount
+    }
+    else{
+      data[i,]$NumNewCases = data[i,]$confirmedCount
+      data[i,]$NumNewDeaths = data[i,]$deadCount
+      data[i,]$NumNewRecovery = data[i,]$curedCount
+    }
+  }
+  
+  expandedData = c()
+  for(j in 1:nrow(data)){
+    if(data[j,]$NumNewCases > 0){
+      expandedData = c(expandedData, rep(as.character(data[j,]$Date), data[j,]$NumNewCases))
+    }
+    if(data[j,]$NumNewCases <= 0){
+      #expandedData = c(expandedData, rep(as.character(data[j,]$Date), 0))
+    }
+  }
+  return(expandedData)
+}
+```
+
+```{r}
+test <- formatData("Wuhan")
+
+testIncidents <- incidence(test)
+best.fit <- fit_optim_split(testIncidents)
+plot(testIncidents, fit = best.fit$fit)
+
+get_info(best.fit$fit, "doubling")
+```
+
+
